@@ -24977,6 +24977,8 @@ THREE.WebGLRenderer = function ( parameters ) {
 	extensions.get( 'OES_texture_half_float_linear' );
 	extensions.get( 'OES_standard_derivatives' );
 	extensions.get( 'ANGLE_instanced_arrays' );
+	
+	var DrawBuffersEXT = extensions.get( 'WEBGL_draw_buffers' );
 
 	if ( extensions.get( 'OES_element_index_uint' ) ) {
 
@@ -24996,6 +24998,8 @@ THREE.WebGLRenderer = function ( parameters ) {
 
 	var bufferRenderer = new THREE.WebGLBufferRenderer( _gl, extensions, _infoRender );
 	var indexedBufferRenderer = new THREE.WebGLIndexedBufferRenderer( _gl, extensions, _infoRender );
+	var defaultAttachments = [ _gl.COLOR_ATTACHMENT0 ];
+	var defaultBackAttachment = [ _gl.BACK ];
 
 	//
 
@@ -25344,6 +25348,17 @@ THREE.WebGLRenderer = function ( parameters ) {
 		if ( renderTarget.depthTexture ) {
 
 			renderTarget.depthTexture.dispose();
+
+		}
+
+		if ( renderTarget instanceof THREE.WebGLMultiRenderTarget && renderTargetProperties.__webglAttachments ) {
+
+			for ( var i = 0; i < renderTarget.attachments.length; i ++ ) {
+
+				var attachmentProperties = properties.get( renderTarget.attachments[ i ] );
+				_gl.deleteTexture( attachmentProperties.__webglTexture );
+
+			}
 
 		}
 
@@ -27811,13 +27826,13 @@ THREE.WebGLRenderer = function ( parameters ) {
 	// Render targets
 
 	// Setup storage for target texture and bind it to correct framebuffer
-	function setupFrameBufferTexture ( framebuffer, renderTarget, attachment, textureTarget ) {
+	function setupFrameBufferTexture ( framebuffer, width, height, texture, attachment, textureTarget ) {
 
-		var glFormat = paramThreeToGL( renderTarget.texture.format );
-		var glType = paramThreeToGL( renderTarget.texture.type );
-		state.texImage2D( textureTarget, 0, glFormat, renderTarget.width, renderTarget.height, 0, glFormat, glType, null );
+		var glFormat = paramThreeToGL( texture.format );
+		var glType = paramThreeToGL( texture.type );
+		state.texImage2D( textureTarget, 0, glFormat, width, height, 0, glFormat, glType, null );
 		_gl.bindFramebuffer( _gl.FRAMEBUFFER, framebuffer );
-		_gl.framebufferTexture2D( _gl.FRAMEBUFFER, attachment, textureTarget, properties.get( renderTarget.texture ).__webglTexture, 0 );
+		_gl.framebufferTexture2D( _gl.FRAMEBUFFER, attachment, textureTarget, properties.get( texture ).__webglTexture, 0 );
 		_gl.bindFramebuffer( _gl.FRAMEBUFFER, null );
 
 	}
@@ -27927,9 +27942,28 @@ THREE.WebGLRenderer = function ( parameters ) {
 
 		renderTarget.addEventListener( 'dispose', onRenderTargetDispose );
 
-		textureProperties.__webglTexture = _gl.createTexture();
+		if ( renderTarget instanceof THREE.WebGLMultiRenderTarget ) {
 
-		_infoMemory.textures ++;
+			renderTargetProperties.__webglAttachmentTextures = [ ];
+			renderTargetProperties.__webglAttachments = [ ];
+
+			for ( var i = 0; i < renderTarget.attachments.length; i ++ ) {
+
+				var attachmentProperties = properties.get( renderTarget.attachments[ i ] );
+				attachmentProperties.__webglTexture = _gl.createTexture();
+				renderTargetProperties.__webglAttachments[ i ] = _gl.COLOR_ATTACHMENT0 + i;
+
+				_infoMemory.textures ++;
+				
+			}
+
+		} else {
+
+			textureProperties.__webglTexture = _gl.createTexture();
+
+			_infoMemory.textures ++;
+
+		}
 
 		var isCube = ( renderTarget instanceof THREE.WebGLRenderTargetCube );
 		var isTargetPowerOfTwo = THREE.Math.isPowerOfTwo( renderTarget.width ) && THREE.Math.isPowerOfTwo( renderTarget.height );
@@ -27952,8 +27986,6 @@ THREE.WebGLRenderer = function ( parameters ) {
 
 		}
 
-		// Setup color buffer
-
 		if ( isCube ) {
 
 			state.bindTexture( _gl.TEXTURE_CUBE_MAP, textureProperties.__webglTexture );
@@ -27961,7 +27993,13 @@ THREE.WebGLRenderer = function ( parameters ) {
 
 			for ( var i = 0; i < 6; i ++ ) {
 
-				setupFrameBufferTexture( renderTargetProperties.__webglFramebuffer[ i ], renderTarget, _gl.COLOR_ATTACHMENT0, _gl.TEXTURE_CUBE_MAP_POSITIVE_X + i );
+				setupFrameBufferTexture(
+					renderTargetProperties.__webglFramebuffer[ i ],
+					renderTarget.width,
+					renderTarget.height,
+					renderTarget.texture,
+					_gl.COLOR_ATTACHMENT0,
+					_gl.TEXTURE_CUBE_MAP_POSITIVE_X + i );
 
 			}
 
@@ -27970,11 +28008,41 @@ THREE.WebGLRenderer = function ( parameters ) {
 
 		} else {
 
-			state.bindTexture( _gl.TEXTURE_2D, textureProperties.__webglTexture );
-			setTextureParameters( _gl.TEXTURE_2D, renderTarget.texture, isTargetPowerOfTwo );
-			setupFrameBufferTexture( renderTargetProperties.__webglFramebuffer, renderTarget, _gl.COLOR_ATTACHMENT0, _gl.TEXTURE_2D );
+			if ( renderTarget instanceof THREE.WebGLMultiRenderTarget ) {
 
-			if ( renderTarget.texture.generateMipmaps && isTargetPowerOfTwo ) _gl.generateMipmap( _gl.TEXTURE_2D );
+				for ( var i = 0; i < renderTarget.attachments.length; i ++ ) {
+
+					var attachment = renderTarget.attachments[ i ];
+					var attachmentProperties = properties.get( attachment );
+
+					state.bindTexture( _gl.TEXTURE_2D, attachmentProperties.__webglTexture );
+					setTextureParameters( _gl.TEXTURE_2D, attachment, isTargetPowerOfTwo );
+					setupFrameBufferTexture( renderTargetProperties.__webglFramebuffer,
+						renderTarget.width,
+						renderTarget.height,
+						attachment,
+						_gl.COLOR_ATTACHMENT0 + i,
+						_gl.TEXTURE_2D );
+
+					if ( attachment.generateMipmaps && isTargetPowerOfTwo ) _gl.generateMipmap( _gl.TEXTURE_2D );
+
+				}
+
+			} else {
+
+				state.bindTexture( _gl.TEXTURE_2D, textureProperties.__webglTexture );
+				setTextureParameters( _gl.TEXTURE_2D, renderTarget.texture, isTargetPowerOfTwo );
+				setupFrameBufferTexture( renderTargetProperties.__webglFramebuffer,
+					renderTarget.width,
+					renderTarget.height,
+					renderTarget.texture,
+					_gl.COLOR_ATTACHMENT0,
+					_gl.TEXTURE_2D );
+
+				if ( renderTarget.texture.generateMipmaps && isTargetPowerOfTwo ) _gl.generateMipmap( _gl.TEXTURE_2D );
+
+			}
+
 			state.bindTexture( _gl.TEXTURE_2D, null );
 
 		}
@@ -28006,11 +28074,11 @@ THREE.WebGLRenderer = function ( parameters ) {
 		}
 
 		var isCube = ( renderTarget instanceof THREE.WebGLRenderTargetCube );
-		var framebuffer;
+		var framebuffer, renderTargetProperties;
 
 		if ( renderTarget ) {
 
-			var renderTargetProperties = properties.get( renderTarget );
+			renderTargetProperties = properties.get( renderTarget );
 
 			if ( isCube ) {
 
@@ -28042,6 +28110,24 @@ THREE.WebGLRenderer = function ( parameters ) {
 
 			_gl.bindFramebuffer( _gl.FRAMEBUFFER, framebuffer );
 			_currentFramebuffer = framebuffer;
+
+			if ( DrawBuffersEXT ) {
+
+				if ( renderTargetProperties && renderTargetProperties.__webglAttachments ) {
+
+					DrawBuffersEXT.drawBuffersWEBGL( renderTargetProperties.__webglAttachments );
+
+				} else if ( renderTarget ) {
+
+					DrawBuffersEXT.drawBuffersWEBGL( defaultAttachments );
+
+				} else {
+
+					DrawBuffersEXT.drawBuffersWEBGL( defaultBackAttachment );
+
+				}
+
+			}
 
 		}
 
@@ -28136,10 +28222,27 @@ THREE.WebGLRenderer = function ( parameters ) {
 	function updateRenderTargetMipmap( renderTarget ) {
 
 		var target = renderTarget instanceof THREE.WebGLRenderTargetCube ? _gl.TEXTURE_CUBE_MAP : _gl.TEXTURE_2D;
-		var texture = properties.get( renderTarget.texture ).__webglTexture;
 
-		state.bindTexture( target, texture );
-		_gl.generateMipmap( target );
+		if ( renderTarget instanceof THREE.WebGLMultiRenderTarget ) {
+
+			for ( var i = 0; i < renderTarget.attachments.length; i ++ ) {
+
+				var texture = properties.get( renderTarget.attachments[ i ] ).__webglTexture;
+
+				state.bindTexture( target, texture );
+				_gl.generateMipmap( target );
+
+			}
+
+		} else {
+
+			var texture = properties.get( renderTarget.texture ).__webglTexture;
+
+			state.bindTexture( target, texture );
+			_gl.generateMipmap( target );
+
+		}
+
 		state.bindTexture( target, null );
 
 	}
@@ -28372,6 +28475,34 @@ THREE.WebGLRenderTargetCube = function ( width, height, options ) {
 
 THREE.WebGLRenderTargetCube.prototype = Object.create( THREE.WebGLRenderTarget.prototype );
 THREE.WebGLRenderTargetCube.prototype.constructor = THREE.WebGLRenderTargetCube;
+
+// File:src/renderers/WebGLMultiRenderTarget.js
+
+/**
+ * @author Matt DesLauriers / @mattdesl
+ */
+
+THREE.WebGLMultiRenderTarget = function ( width, height, options ) {
+
+  THREE.WebGLRenderTarget.call( this, width, height, options );
+
+  this.attachments = [ this.texture ];
+};
+
+THREE.WebGLMultiRenderTarget.prototype = Object.create( THREE.WebGLRenderTarget.prototype );
+THREE.WebGLMultiRenderTarget.prototype.constructor = THREE.WebGLMultiRenderTarget;
+
+THREE.WebGLMultiRenderTarget.copy = function ( source ) {
+
+  THREE.WebGLRenderTarget.prototype.copy.call( this, source );
+
+  this.attachments = source.attachments.map(function ( attachment ) {
+    return attachment.clone();
+  });
+
+  return this;
+
+};
 
 // File:src/renderers/webgl/WebGLBufferRenderer.js
 
@@ -36387,7 +36518,7 @@ THREE.BoxBufferGeometry = function ( width, height, depth, widthSegments, height
 
 	// these are used to calculate buffer length
 	var vertexCount = calculateVertexCount( widthSegments, heightSegments, depthSegments );
-	var indexCount = ( vertexCount / 4 ) * 6;
+	var indexCount = calculateIndexCount( widthSegments, heightSegments, depthSegments );
 
 	// buffers
 	var indices = new ( indexCount > 65535 ? Uint32Array : Uint16Array )( indexCount );
@@ -36422,14 +36553,27 @@ THREE.BoxBufferGeometry = function ( width, height, depth, widthSegments, height
 
 	function calculateVertexCount ( w, h, d ) {
 
-		var segments = 0;
+		var vertices = 0;
 
-		// calculate the amount of segments for each side
-		segments += w * h * 2; // xy
-		segments += w * d * 2; // xz
-		segments += d * h * 2; // zy
+		// calculate the amount of vertices for each side (plane)
+		vertices += (w + 1) * (h + 1) * 2; // xy
+		vertices += (w + 1) * (d + 1) * 2; // xz
+		vertices += (d + 1) * (h + 1) * 2; // zy
 
-		return segments * 4; // four vertices per segments
+		return vertices;
+
+	}
+
+	function calculateIndexCount ( w, h, d ) {
+
+		var index = 0;
+
+		// calculate the amount of squares for each side
+		index += w * h * 2; // xy
+		index += w * d * 2; // xz
+		index += d * h * 2; // zy
+
+		return index * 6; // two triangles per square => six vertices per square
 
 	}
 
