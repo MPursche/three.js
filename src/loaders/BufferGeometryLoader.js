@@ -27,8 +27,12 @@ THREE.BufferGeometryLoader.prototype = {
 
 	parse: function ( json ) {
 
-		var geometry = new THREE.BufferGeometry();
+		var GEOMETRY_TYPES = {
+			'BufferGeometry': THREE.BufferGeometry,
+			'InstancedBufferGeometry': THREE.InstancedBufferGeometry
+		};
 
+		var geometry = new GEOMETRY_TYPES[json.metadata.type];
 		var index = json.data.index;
 
 		var TYPED_ARRAYS = {
@@ -50,6 +54,10 @@ THREE.BufferGeometryLoader.prototype = {
 
 		}
 
+		if ( json.maxInstancedCount !== undefined ) {
+			geometry.maxInstancedCount = json.maxInstancedCount;
+		}
+
 		var attributes = json.data.attributes;
 
 		for ( var key in attributes ) {
@@ -57,7 +65,11 @@ THREE.BufferGeometryLoader.prototype = {
 			var attribute = attributes[ key ];
 			var typedArray = new TYPED_ARRAYS[ attribute.type ]( attribute.array );
 
-			geometry.addAttribute( key, new THREE.BufferAttribute( typedArray, attribute.itemSize, attribute.normalized ) );
+			if (attribute.instanced) {
+				geometry.addAttribute( key, new THREE.InstancedBufferAttribute( typedArray, attribute.itemSize, attribute.meshPerAttribute ) );
+			} else {
+				geometry.addAttribute( key, new THREE.BufferAttribute( typedArray, attribute.itemSize, attribute.normalized ) );
+			}
 
 		}
 

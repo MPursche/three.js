@@ -12464,6 +12464,77 @@ THREE.InstancedBufferGeometry.prototype.copy = function ( source ) {
 
 };
 
+THREE.InstancedBufferGeometry.prototype.toJSON = function () {
+	var data = {
+		metadata: {
+			version: 4.4,
+			type: 'InstancedBufferGeometry',
+			generator: 'InstancedBufferGeometry.toJSON'
+		}
+	};
+
+	// standard InstancedBufferGeometry serialization
+	data.uuid = this.uuid;
+	data.type = this.type;
+	data.maxInstancedCount = this.maxInstancedCount;
+
+	if ( this.name !== '' ) data.name = this.name;
+
+	if ( this.parameters !== undefined ) {
+		var parameters = this.parameters;
+
+		for ( var key in parameters ) {
+
+			if ( parameters[ key ] !== undefined ) data[ key ] = parameters[ key ];
+
+		}
+
+		return data;
+	}
+
+	data.data = { attributes: {} };
+	var index = this.index;
+
+	if (index !== null) {
+		var array = Array.prototype.slice.call( index.array );
+
+		data.data.index = {
+			type: index.array.constructor.name,
+			array: array
+		};
+	}
+
+	var attributes = this.attributes;
+	for (var key in attributes) {
+		var attribute = attributes[key];
+		var array = Array.prototype.slice.call( attribute.array );
+
+		data.data.attributes[ key ] = {
+			itemSize: attribute.itemSize,
+			type: attribute.array.constructor.name,
+			array: array,
+			normalized: attribute.normalized,
+			instanced: (attribute instanceof THREE.InstancedBufferAttribute),
+			meshPerAttribute: attribute.meshPerAttribute || 1
+		};
+	}
+
+	var groups = this.groups;
+	if ( groups.length > 0 ) {
+		data.data.groups = JSON.parse( JSON.stringify( groups ) );
+	}
+
+	var boundingSphere = this.boundingSphere;
+	if ( boundingSphere !== null ) {
+		data.data.boundingSphere = {
+			center: boundingSphere.center.toArray(),
+			radius: boundingSphere.radius
+		};
+	}
+
+	return data;
+}
+
 THREE.EventDispatcher.prototype.apply( THREE.InstancedBufferGeometry.prototype );
 
 // File:src/core/Uniform.js
@@ -19067,8 +19138,12 @@ THREE.BufferGeometryLoader.prototype = {
 
 	parse: function ( json ) {
 
-		var geometry = new THREE.BufferGeometry();
+		var GEOMETRY_TYPES = {
+			'BufferGeometry': THREE.BufferGeometry,
+			'InstancedBufferGeometry': THREE.InstancedBufferGeometry
+		};
 
+		var geometry = new GEOMETRY_TYPES[json.metadata.type];
 		var index = json.data.index;
 
 		var TYPED_ARRAYS = {
@@ -19090,6 +19165,10 @@ THREE.BufferGeometryLoader.prototype = {
 
 		}
 
+		if ( json.maxInstancedCount !== undefined ) {
+			geometry.maxInstancedCount = json.maxInstancedCount;
+		}
+
 		var attributes = json.data.attributes;
 
 		for ( var key in attributes ) {
@@ -19097,7 +19176,11 @@ THREE.BufferGeometryLoader.prototype = {
 			var attribute = attributes[ key ];
 			var typedArray = new TYPED_ARRAYS[ attribute.type ]( attribute.array );
 
-			geometry.addAttribute( key, new THREE.BufferAttribute( typedArray, attribute.itemSize, attribute.normalized ) );
+			if (attribute.instanced) {
+				geometry.addAttribute( key, new THREE.InstancedBufferAttribute( typedArray, attribute.itemSize, attribute.meshPerAttribute ) );
+			} else {
+				geometry.addAttribute( key, new THREE.BufferAttribute( typedArray, attribute.itemSize, attribute.normalized ) );
+			}
 
 		}
 
